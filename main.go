@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 )
 
 func getDefaultClient() *http.Client {
@@ -33,6 +34,9 @@ type Pipeline struct {
 
 	running bool
 	wg      sync.WaitGroup
+
+	rl          *rateLimiter
+	rateLimited bool
 }
 
 func New(concurrency int) *Pipeline {
@@ -43,6 +47,9 @@ func New(concurrency int) *Pipeline {
 		reqs:   make(chan request),
 
 		running: false,
+
+		rl:          newRateLimiter(0),
+		rateLimited: false,
 	}
 }
 
@@ -50,6 +57,34 @@ func NewWithClient(concurrency int, client *http.Client) *Pipeline {
 	p := New(concurrency)
 	p.client = client
 	return p
+}
+
+func (p *Pipeline) SetRateLimit(d time.Duration) {
+	if p.running {
+		return
+	}
+
+	if d == 0 {
+		p.rateLimited = false
+	} else {
+		p.rateLimited = true
+	}
+
+	p.rl.delay = d
+}
+
+func (p *Pipeline) SetClient(c *http.Client) {
+	if p.running {
+		return
+	}
+	p.client = c
+}
+
+func (p *Pipeline) SetConcurrency(c int) {
+	if p.running {
+		return
+	}
+	p.concurrency = c
 }
 
 func (p *Pipeline) Do(r *http.Request, fn ProcFn) {
@@ -93,6 +128,10 @@ func (p *Pipeline) Run() {
 		p.wg.Add(1)
 		go func() {
 			for r := range p.reqs {
+				if p.rateLimited {
+					p.rl.Block(r.req.URL.Hostname())
+				}
+
 				resp, err := p.client.Do(r.req)
 				r.fn(r.req, resp, err)
 			}
@@ -103,4 +142,33 @@ func (p *Pipeline) Run() {
 
 func (p *Pipeline) Wait() {
 	p.wg.Wait()
+}
+
+func CloseBody(fn ProcFn) ProcFn {
+	return func(req *http.Request, resp *http.Response, err error) {
+		fn(req, resp, err)
+
+		if resp == nil {
+			return
+		}
+		if resp.Body != nil {
+			resp.Body.Close()
+		}
+	}
+}
+
+func IfNoError(fn ProcFn) ProcFn {
+	return func(req *http.Request, resp *http.Response, err error) {
+		if err != nil {
+			return
+		}
+		fn(req, resp, err)
+	}
+}
+
+func Wrap(fn ProcFn, middleware ...func(ProcFn) ProcFn) ProcFn {
+	for _, m := range middleware {
+		fn = m(fn)
+	}
+	return fn
 }

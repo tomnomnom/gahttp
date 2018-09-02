@@ -13,44 +13,43 @@ Work in progress.
 package main
 
 import (
-	"fmt"
-	"net/http"
+    "fmt"
+    "net/http"
+    "time"
 
-	"github.com/tomnomnom/gahttp"
+    "github.com/tomnomnom/gahttp"
 )
 
 func printStatus(req *http.Request, resp *http.Response, err error) {
-	if resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		return
-	}
-	fmt.Printf("%s: %s\n", req.URL, resp.Status)
+    if err != nil {
+        return
+    }
+    fmt.Printf("%s: %s\n", req.URL, resp.Status)
 }
 
 func main() {
-	p := gahttp.New(20)
+    p := gahttp.New(20)
+    p.SetRateLimit(time.Second * 1)
 
-	urls := []string{
-		"http://example.com",
-		"http://example.net",
-		"http://example.org",
-	}
+    urls := []string{
+        "http://example.com",
+        "http://example.com",
+        "http://example.com",
+        "http://example.net",
+        "http://example.org",
+    }
 
-	for _, u := range urls {
-		p.Get(u, printStatus)
-	}
-	p.Done()
+    for _, u := range urls {
+        p.Get(u, gahttp.Wrap(printStatus, gahttp.CloseBody))
+    }
+    p.Done()
 
-	p.Wait()
+    p.Wait()
 }
-
 ```
 
 ## TODO
 
-* Optional rate limiting
 * Functions to return commonly used clients (e.g. ignore cert errors, don't follow redirects)
 * `DoneAndWait()` func?
 * Tests (lol)
