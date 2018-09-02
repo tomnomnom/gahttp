@@ -7,11 +7,6 @@ import (
 	"time"
 )
 
-// getDefaultClient returns the default HTTP client
-func getDefaultClient() *http.Client {
-	return &http.Client{}
-}
-
 // a ProcFn is a function that processes an HTTP response.
 // The HTTP request is provided for context, along with any
 // error that occurred.
@@ -44,7 +39,7 @@ func New(concurrency int) *Pipeline {
 	return &Pipeline{
 		concurrency: concurrency,
 
-		client: getDefaultClient(),
+		client: NewDefaultClient(),
 		reqs:   make(chan request),
 
 		running: false,

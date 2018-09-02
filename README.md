@@ -50,7 +50,7 @@ func main() {
 
 ## TODO
 
-* Functions to return commonly used clients (e.g. ignore cert errors, don't follow redirects)
 * `DoneAndWait()` func?
 * Helper for writing responses to channel? (e.g. `func ChanWriter() (chan *Response, procFn)`)
     - For when you don't want to do the work concurrently
+* Actually handle timeouts / provide context interface for cancellation etc?
