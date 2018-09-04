@@ -1,8 +1,6 @@
 # gahttp
 
-Async/concurrent HTTP requests for Go.
-
-An attempt to handle some of the boilerplate of doing concurrent HTTP requests in Go.
+Async/concurrent HTTP requests for Go with rate-limiting.
 
 Work in progress.
 

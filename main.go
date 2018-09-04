@@ -35,9 +35,9 @@ type Pipeline struct {
 }
 
 // New returns a new *Pipeline for the provided concurrency level
-func New(concurrency int) *Pipeline {
+func NewPipeline() *Pipeline {
 	return &Pipeline{
-		concurrency: concurrency,
+		concurrency: 1,
 
 		client: NewDefaultClient(),
 		reqs:   make(chan request),
@@ -51,8 +51,8 @@ func New(concurrency int) *Pipeline {
 
 // NewWithClient returns a new *Pipeline for the provided concurrency
 // level, and uses the provided *http.Client to make requests
-func NewWithClient(concurrency int, client *http.Client) *Pipeline {
-	p := New(concurrency)
+func NewPipelineWithClient(client *http.Client) *Pipeline {
+	p := NewPipeline()
 	p.client = client
 	return p
 }
@@ -104,6 +104,16 @@ func (p *Pipeline) Do(r *http.Request, fn ProcFn) {
 	if !p.running {
 		p.Run()
 	}
+
+	// If you're doing a lot of requests to lots of
+	// different hosts, having the underlying TCP
+	// connections stay open can cause you to run
+	// out of file descriptors pretty quickly. To
+	// help prevent that, forcibly set all requests
+	// to have 'Connection: close' set. This should
+	// probably be made configurable, but even then
+	// should still be turned on by default.
+	r.Close = true
 
 	p.reqs <- request{r, fn}
 }
@@ -187,8 +197,29 @@ func CloseBody(fn ProcFn) ProcFn {
 	}
 }
 
-// Wrap accepts a ProcFn and applies any number of 'middleware' functions
-// to it (e.g. the CloseBody function).
+// IfNoError only calls the provided ProcFn if there was no error
+// when executing the HTTP request
+func IfNoError(fn ProcFn) ProcFn {
+	return func(req *http.Request, resp *http.Response, err error) {
+		if err == nil {
+			fn(req, resp, err)
+			return
+		}
+
+		// because control isn't passed to the user's
+		// function, when there's an error we need to
+		// check for and close the response body
+		if resp == nil {
+			return
+		}
+		if resp.Body != nil {
+			resp.Body.Close()
+		}
+	}
+}
+
+// Wrap accepts a ProcFn and wraps it in any number of 'middleware'
+// functions (e.g. the CloseBody function).
 func Wrap(fn ProcFn, middleware ...func(ProcFn) ProcFn) ProcFn {
 	for _, m := range middleware {
 		fn = m(fn)

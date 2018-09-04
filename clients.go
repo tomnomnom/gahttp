@@ -3,11 +3,14 @@ package gahttp
 import (
 	"crypto/tls"
 	"net/http"
+	"time"
 )
 
 // NewDefaultClient returns the default HTTP client
 func NewDefaultClient() *http.Client {
-	return &http.Client{}
+	return &http.Client{
+		Timeout: time.Second * 30,
+	}
 }
 
 // ClientOptions are a bitmask of options for HTTP clients
@@ -32,6 +35,7 @@ func NewClient(opts ClientOptions) *http.Client {
 
 	client := &http.Client{
 		Transport: transport,
+		Timeout:   time.Second * 30,
 	}
 
 	if opts&NoRedirects > 0 {
