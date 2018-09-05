@@ -15,7 +15,7 @@ func TestSmoke(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	p := New(2)
+	p := NewPipeline()
 
 	p.Get(ts.URL, func(req *http.Request, resp *http.Response, err error) {
 		if err != nil {
