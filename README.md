@@ -26,7 +26,8 @@ func printStatus(req *http.Request, resp *http.Response, err error) {
 }
 
 func main() {
-    p := gahttp.New(20)
+    p := gahttp.NewPipeline()
+    p.SetConcurrency(20)
     p.SetRateLimit(time.Second * 1)
 
     urls := []string{
