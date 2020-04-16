@@ -134,7 +134,7 @@ func (p *Pipeline) Get(u string, fn ProcFn) error {
 // HTTP POST requests. It accepts a URL, an io.Reader for the POST
 // body, and a ProcFn to process the response.
 func (p *Pipeline) Post(u string, body io.Reader, fn ProcFn) error {
-	req, err := http.NewRequest("GET", u, body)
+	req, err := http.NewRequest("POST", u, body)
 	if err != nil {
 		return err
 	}
