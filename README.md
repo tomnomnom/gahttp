@@ -37,9 +37,15 @@ func main() {
         "http://example.net",
         "http://example.org",
     }
+    
+    actualHost := "127.0.0.1"
 
     for _, u := range urls {
         p.Get(u, gahttp.Wrap(printStatus, gahttp.CloseBody))
+
+        // ... or 
+
+        p.GetFromHost(u, actualHost, gahttp.Wrap(printStatus, gahttp.CloseBody))
     }
     p.Done()
 
