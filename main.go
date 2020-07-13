@@ -3,6 +3,8 @@ package gahttp
 import (
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -123,6 +125,27 @@ func (p *Pipeline) Do(r *http.Request, fn ProcFn) {
 // the response.
 func (p *Pipeline) Get(u string, fn ProcFn) error {
 	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return err
+	}
+	p.Do(req, fn)
+	return nil
+}
+
+// GetFromHost is a convenience wrapper around the Do() function for making
+// HTTP GET requests. It accepts a URL a Host address and the ProcFn to process
+// the response.
+// It will put the host from the url in the host-header and use the given Host address instead of the host in the url.
+func (p *Pipeline) GetFromHost(u string, actualHost string, fn ProcFn) error {
+	tmpURL, err := url.Parse(u)
+	if err != nil {
+		return err
+	}
+	urlHost := tmpURL.Host
+
+	u = strings.Replace(u, urlHost, actualHost, -1)
+	req, err := http.NewRequest("GET", u, nil)
+	req.Host = urlHost
 	if err != nil {
 		return err
 	}
