@@ -1,228 +1,79 @@
-package gahttp
+package main
 
 import (
-	"io"
+	"bufio"
+	"flag"
+	"fmt"
 	"net/http"
-	"sync"
-	"time"
+	"net/url"
+	"strings"
+
+	"github.com/fcynic3/gahttp"
+	"golang.org/x/net/html"
 )
 
-// a ProcFn is a function that processes an HTTP response.
-// The HTTP request is provided for context, along with any
-// error that occurred.
-type ProcFn func(*http.Request, *http.Response, error)
-
-// a request wraps a Go HTTP request struct, and a ProcFn
-// to process its result
-type request struct {
-	req *http.Request
-	fn  ProcFn
-}
-
-// a Pipeline is the main component of the gahttp package.
-// It orchestrates making requests, optionally rate limiting them
-type Pipeline struct {
-	concurrency int
-
-	client *http.Client
-	reqs   chan request
-
-	running bool
-	wg      sync.WaitGroup
-
-	rl          *rateLimiter
-	rateLimited bool
-}
-
-// New returns a new *Pipeline for the provided concurrency level
-func NewPipeline() *Pipeline {
-	return &Pipeline{
-		concurrency: 1,
-
-		client: NewDefaultClient(),
-		reqs:   make(chan request),
-
-		running: false,
-
-		rl:          newRateLimiter(0),
-		rateLimited: false,
-	}
-}
-
-// NewWithClient returns a new *Pipeline for the provided concurrency
-// level, and uses the provided *http.Client to make requests
-func NewPipelineWithClient(client *http.Client) *Pipeline {
-	p := NewPipeline()
-	p.client = client
-	return p
-}
-
-// SetRateLimit sets the delay between requests to a given hostname
-func (p *Pipeline) SetRateLimit(d time.Duration) {
-	if p.running {
-		return
-	}
-
-	if d == 0 {
-		p.rateLimited = false
-	} else {
-		p.rateLimited = true
-	}
-
-	p.rl.delay = d
-}
-
-// SetRateLimitMillis sets the delay between request to a given hostname
-// in milliseconds. This function is provided as a convenience, to make
-// it easy to accept integer values as command line arguments.
-func (p *Pipeline) SetRateLimitMillis(m int) {
-	p.SetRateLimit(time.Duration(m * 1000000))
-}
-
-// SetClient sets the HTTP client used by the pipeline to make HTTP
-// requests. It can only be set before the pipeline is running
-func (p *Pipeline) SetClient(c *http.Client) {
-	if p.running {
-		return
-	}
-	p.client = c
-}
-
-// SetConcurrency sets the concurrency level for the pipeline.
-// It can only be set before the pipeline is running
-func (p *Pipeline) SetConcurrency(c int) {
-	if p.running {
-		return
-	}
-	p.concurrency = c
-}
-
-// Do is the pipeline's generic request function; similar to
-// http.DefaultClient.Do(), but it also accepts a ProcFn which
-// will be called when the request has been executed
-func (p *Pipeline) Do(r *http.Request, fn ProcFn) {
-	if !p.running {
-		p.Run()
-	}
-
-	// If you're doing a lot of requests to lots of
-	// different hosts, having the underlying TCP
-	// connections stay open can cause you to run
-	// out of file descriptors pretty quickly. To
-	// help prevent that, forcibly set all requests
-	// to have 'Connection: close' set. This should
-	// probably be made configurable, but even then
-	// should still be turned on by default.
-	r.Close = true
-
-	p.reqs <- request{r, fn}
-}
-
-// Get is a convenience wrapper around the Do() function for making
-// HTTP GET requests. It accepts a URL and the ProcFn to process
-// the response.
-func (p *Pipeline) Get(u string, fn ProcFn) error {
-	req, err := http.NewRequest("GET", u, nil)
+func extractTitle(req *http.Request, resp *http.Response, err error) {
 	if err != nil {
-		return err
-	}
-	p.Do(req, fn)
-	return nil
-}
-
-// Post is a convenience wrapper around the Do() function for making
-// HTTP POST requests. It accepts a URL, an io.Reader for the POST
-// body, and a ProcFn to process the response.
-func (p *Pipeline) Post(u string, body io.Reader, fn ProcFn) error {
-	req, err := http.NewRequest("GET", u, body)
-	if err != nil {
-		return err
-	}
-	p.Do(req, fn)
-	return nil
-}
-
-// Done should be called to signal to the pipeline that all requests
-// that will be made have been enqueued. This closes the internal
-// channel used to send requests to the workers that are executing
-// the HTTP requests.
-func (p *Pipeline) Done() {
-	close(p.reqs)
-}
-
-// Run puts the pipeline into a running state. It launches the
-// worker processes that execute the HTTP requests. Run() is
-// called automatically by Do(), Get() and Post(), so it's often
-// not necessary to call it directly.
-func (p *Pipeline) Run() {
-	if p.running {
 		return
 	}
-	p.running = true
 
-	// launch workers
-	for i := 0; i < p.concurrency; i++ {
-		p.wg.Add(1)
-		go func() {
-			for r := range p.reqs {
-				if p.rateLimited {
-					p.rl.Block(r.req.URL.Hostname())
-				}
+	z := html.NewTokenizer(resp.Body)
 
-				resp, err := p.client.Do(r.req)
-				r.fn(r.req, resp, err)
+	for {
+		tt := z.Next()
+		if tt == html.ErrorToken {
+			break
+		}
+
+		t := z.Token()
+
+		if t.Type == html.StartTagToken && t.Data == "title" {
+			if z.Next() == html.TextToken {
+				title := strings.TrimSpace(z.Token().Data)
+				fmt.Printf("%s (%s)\n", title, req.URL)
+				break
 			}
-			p.wg.Done()
-		}()
+		}
+
 	}
 }
 
-// Wait blocks until all requests in the pipeline have been executed
-func (p *Pipeline) Wait() {
-	p.wg.Wait()
-}
+func main() {
+	var (
+		concurrency int
+		proxyURL    string
+	)
 
-// CloseBody wraps a ProcFn and returns a version of it that automatically
-// closed the response body
-func CloseBody(fn ProcFn) ProcFn {
-	return func(req *http.Request, resp *http.Response, err error) {
-		fn(req, resp, err)
+	flag.IntVar(&concurrency, "c", 20, "Concurrency")
+	flag.StringVar(&proxyURL, "proxy", "", "Proxy URL")
+	flag.Parse()
 
-		if resp == nil {
+	p := gahttp.NewPipeline()
+	p.SetConcurrency(concurrency)
+
+	if proxyURL != "" {
+		proxyURL, err := url.Parse(proxyURL)
+		if err != nil {
+			fmt.Println("Failed to parse proxy URL:", err)
 			return
 		}
-		if resp.Body != nil {
-			resp.Body.Close()
+		p.HTTPClient.Transport = &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
 		}
 	}
-}
 
-// IfNoError only calls the provided ProcFn if there was no error
-// when executing the HTTP request
-func IfNoError(fn ProcFn) ProcFn {
-	return func(req *http.Request, resp *http.Response, err error) {
-		if err == nil {
-			fn(req, resp, err)
-			return
-		}
+	extractFn := gahttp.Wrap(extractTitle, gahttp.CloseBody)
 
-		// because control isn't passed to the user's
-		// function, when there's an error we need to
-		// check for and close the response body
-		if resp == nil {
-			return
+	sc := bufio.NewScanner(os.Stdin)
+	for sc.Scan() {
+		req, err := http.NewRequest("GET", sc.Text(), nil)
+		if err != nil {
+			fmt.Println("Failed to create request:", err)
+			continue
 		}
-		if resp.Body != nil {
-			resp.Body.Close()
-		}
+		p.Do(req, extractFn)
 	}
-}
+	p.Done()
 
-// Wrap accepts a ProcFn and wraps it in any number of 'middleware'
-// functions (e.g. the CloseBody function).
-func Wrap(fn ProcFn, middleware ...func(ProcFn) ProcFn) ProcFn {
-	for _, m := range middleware {
-		fn = m(fn)
-	}
-	return fn
+	p.Wait()
 }
